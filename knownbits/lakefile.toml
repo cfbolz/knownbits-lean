@@ -1,0 +1,10 @@
+name = "knownbits"
+version = "0.1.0"
+defaultTargets = ["knownbits"]
+
+[[lean_lib]]
+name = "Knownbits"
+
+[[lean_exe]]
+name = "knownbits"
+root = "Main"
