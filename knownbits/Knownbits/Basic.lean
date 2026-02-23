@@ -226,3 +226,74 @@ theorem add_precise {sum a b : KnownBits n} (h : sum.IsAddOf a b) : (a.add b).Su
   simp only [Contains]; simp only [IsAddOf] at h;
   sorry /- *much* more difficult -/
 -/
+
+
+
+/- SMask -/
+
+structure SMask (n : Nat) where
+  smask    : BitVec n
+  wf       : ∃ x : Nat, smask = (~~~(0 : BitVec n)) <<< x ∧ x < n := by first | bv_decide | grind
+
+namespace SMask
+
+def top (n : Nat) (hn : n > 0) : SMask n where
+  smask := (~~~(0 : BitVec n)) <<< (n - 1);
+  wf := by
+    apply Exists.intro (n - 1); grind
+
+def isTop (kb : SMask n) : Prop :=
+  ∃ hn : n > 0, kb = top n hn
+
+@[grind, simp]
+def Contains (kb : SMask n) (val : BitVec n) : Prop :=
+  val &&& kb.smask = 0 ∨ val &&& kb.smask = kb.smask
+
+
+theorem contains_zero {n} (kb : SMask n) : kb.Contains 0 := by
+  simp [Contains]
+
+theorem contains_mask {n} (kb : SMask n) : kb.Contains (kb.smask) := by
+  simp [Contains]
+
+theorem TopContainsEverything {n} (hn : n > 0) (val : BitVec n) : (top n hn).Contains val := by
+  simp [top, Contains]; grind;
+
+@[grind, simp]
+def and (kb₁ kb₂ : SMask n) : SMask n where
+  smask := kb₁.smask &&& kb₂.smask
+  wf := by
+    have h₁ := kb₁.wf; have h₂ := kb₂.wf; grind;
+
+@[grind, simp]
+def IsAndOf (and a b : SMask n) :=
+  ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → and.Contains (bv₁ &&& bv₂)
+
+theorem and_sound {n} (sm₁ sm₂ : SMask n) : (sm₁.and sm₂).IsAndOf sm₁ sm₂ := by
+  grind
+
+theorem all_ones_shift_and_all_ones_shift_is_all_ones_shift {n} (x₁ x₂ : Nat) :
+  (~~~(0 : BitVec n)) <<< x₁ &&& (~~~(0 : BitVec n)) <<< x₂ = (~~~(0 : BitVec n)) <<< max x₁ x₂ := by
+  grind
+
+@[grind, simp]
+def add (kb₁ kb₂ : SMask n) (h1 : ¬ kb₁.isTop) (h2 : ¬ kb₂.isTop) : SMask n where
+  smask := (kb₁.smask &&& kb₂.smask) <<< 1
+  wf := by
+    have h₁ := kb₁.wf;
+    have h₂ := kb₂.wf;
+    obtain ⟨x₁, ⟨ h1a, h1b⟩ ⟩ := h₁;
+    obtain ⟨x₂, ⟨ h2a, h2b⟩ ⟩ := h₂;
+    rw [h1a]; rw [h2a];
+    simp; apply Exists.intro (max x₁ x₂); sorry
+
+def IsAddOf (sum a b : SMask n) :=
+  ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → sum.Contains (bv₁ + bv₂)
+
+theorem add_top_sound {n} (sm₁ sm₂ : SMask n) (hn : n > 0) : (top n hn).IsAddOf sm₁ sm₂ := by
+  simp only [top, IsAddOf, Contains] at *;
+  intro bv₁ bv₂ h; grind;
+
+theorem add_sound {n} (sm₁ sm₂ : SMask n) (h1 : ¬ sm₁.isTop) (h2 : ¬ sm₂.isTop) : (sm₁.add sm₂ h1 h2).IsAddOf sm₁ sm₂ := by
+  simp only [add, IsAddOf] at *;
+  intro bv₁ bv₂ h; sorry;
