@@ -1,3 +1,5 @@
+import Std
+
 /- bv lemmas -/
 
 theorem and_xor_distrib_left {x y z : BitVec w} : x &&& (y ^^^ z) = (x &&& y) ^^^ (x &&& z) :=
@@ -218,6 +220,9 @@ structure SMask (n : Nat) where
 
 namespace SMask
 
+theorem ext {n} (a b : SMask n) (h : a.smask = b.smask) : a = b := by
+  cases a; cases b; simp at *; exact h
+
 def top (n : Nat) (hn : n > 0) : SMask n where
   smask := (~~~(0 : BitVec n)) <<< (n - 1);
   wf := by
@@ -233,7 +238,10 @@ def upper_bound {n} (kb : SMask n) : (BitVec n) :=
   ~~~(kb.smask)
 
 theorem smask_is_negative {n} (kb : SMask n) (h : n > 0) : BitVec.slt kb.smask 0 := by
-  obtain ⟨x, ⟨ h1a, h1b⟩ ⟩ := kb.wf; rw [h1a]; sorry;
+  obtain ⟨x, ⟨ h1a, h1b⟩ ⟩ := kb.wf; rw [h1a];
+  apply BitVec.slt_zero_iff_msb_cond.mpr
+  simp [BitVec.msb, BitVec.getMsbD_eq_getLsbD, BitVec.getLsbD_shiftLeft]
+  omega
 
 @[grind, simp]
 def Contains (kb : SMask n) (val : BitVec n) : Prop :=
@@ -266,6 +274,33 @@ def IsAndOf (and a b : SMask n) :=
 theorem and_sound {n} (sm₁ sm₂ : SMask n) : (sm₁.and sm₂).IsAndOf sm₁ sm₂ := by
   grind
 
+theorem allOnes_shl_inj {n} {x₁ x₂ : Nat} (hx₁ : x₁ < n) (hx₂ : x₂ < n)
+    (h : (~~~(0 : BitVec n) <<< x₁) = (~~~(0 : BitVec n) <<< x₂)) : x₁ = x₂ := by
+  have hne (h_ne : x₁ ≠ x₂) : False := by
+    have hlt : x₁ < x₂ ∨ x₂ < x₁ := Nat.lt_or_gt_of_ne h_ne
+    cases hlt with
+    | inl hlt =>
+      have h1 : (~~~(0 : BitVec n) <<< x₁).getLsbD x₁ = true := by
+        simp [BitVec.getLsbD_shiftLeft, BitVec.getLsbD_not, hx₁]
+      have h2 : (~~~(0 : BitVec n) <<< x₂).getLsbD x₁ = false := by
+        simp [BitVec.getLsbD_shiftLeft]
+        omega
+      rw [h] at h1
+      rw [h1] at h2
+      contradiction
+    | inr hlt =>
+      have h1 : (~~~(0 : BitVec n) <<< x₂).getLsbD x₂ = true := by
+        simp [BitVec.getLsbD_shiftLeft, BitVec.getLsbD_not, hx₂]
+      have h2 : (~~~(0 : BitVec n) <<< x₁).getLsbD x₂ = false := by
+        simp [BitVec.getLsbD_shiftLeft]
+        omega
+      rw [← h] at h1
+      rw [h1] at h2
+      contradiction
+  apply Classical.byContradiction
+  intro h_ne
+  exact hne h_ne
+
 theorem all_ones_shift_and_all_ones_shift_is_all_ones_shift {n} (x₁ x₂ : Nat) :
   (~~~(0 : BitVec n)) <<< x₁ &&& (~~~(0 : BitVec n)) <<< x₂ = (~~~(0 : BitVec n)) <<< max x₁ x₂ := by
   grind
@@ -274,19 +309,43 @@ theorem all_ones_shift_and_all_ones_shift_is_all_ones_shift {n} (x₁ x₂ : Nat
 def add (kb₁ kb₂ : SMask n) (h1 : ¬ kb₁.isTop) (h2 : ¬ kb₂.isTop) : SMask n where
   smask := (kb₁.smask &&& kb₂.smask) <<< 1
   wf := by
-    have h₁ := kb₁.wf;
-    have h₂ := kb₂.wf;
-    obtain ⟨x₁, ⟨ h1a, h1b⟩ ⟩ := h₁;
-    obtain ⟨x₂, ⟨ h2a, h2b⟩ ⟩ := h₂;
-    rw [h1a]; rw [h2a]; sorry;
+    have ⟨x₁, h1a, h1b⟩ := kb₁.wf
+    have ⟨x₂, h2a, h2b⟩ := kb₂.wf
+    rw [h1a, h2a, all_ones_shift_and_all_ones_shift_is_all_ones_shift]
+    apply Exists.intro (max x₁ x₂ + 1)
+    apply And.intro
+    . simp [BitVec.shiftLeft_add]
+    . have hn : n > 0 := by
+        apply Classical.byContradiction
+        intro hn'
+        simp at hn'
+        subst hn'
+        omega
+      have hx₁_lt : x₁ < n - 1 := by
+        apply Classical.byContradiction
+        intro h_ge
+        have : x₁ = n - 1 := by omega
+        have : kb₁ = top n hn := by
+          apply SMask.ext
+          simp [top, h1a, this]
+        exact h1 ⟨hn, this⟩
+      have hx₂_lt : x₂ < n - 1 := by
+        apply Classical.byContradiction
+        intro h_ge
+        have : x₂ = n - 1 := by omega
+        have : kb₂ = top n hn := by
+          apply SMask.ext
+          simp [top, h2a, this]
+        exact h2 ⟨hn, this⟩
+      omega
 
 def IsAddOf (sum a b : SMask n) :=
   ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → sum.Contains (bv₁ + bv₂)
 
 theorem add_top_sound {n} (sm₁ sm₂ : SMask n) (hn : n > 0) : (top n hn).IsAddOf sm₁ sm₂ := by
-  simp only [top, IsAddOf, Contains] at *;
-  intro bv₁ bv₂ h; grind;
+  simp only [top, IsAddOf, Contains] at *
+  intro bv₁ bv₂ h; grind
 
 theorem add_sound {n} (sm₁ sm₂ : SMask n) (h1 : ¬ sm₁.isTop) (h2 : ¬ sm₂.isTop) : (sm₁.add sm₂ h1 h2).IsAddOf sm₁ sm₂ := by
-  simp only [add, IsAddOf] at *;
-  intro bv₁ bv₂ h; sorry;
+  simp only [add, IsAddOf] at *
+  intro bv₁ bv₂ h; sorry
