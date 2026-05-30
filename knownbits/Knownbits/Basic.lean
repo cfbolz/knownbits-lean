@@ -1,14 +1,16 @@
-import Std.Tactic.BVDecide
-
-
-
-/- bv lemmas, should be upstreamed -/
+/- bv lemmas -/
 
 theorem and_xor_distrib_left {x y z : BitVec w} : x &&& (y ^^^ z) = (x &&& y) ^^^ (x &&& z) :=
   BitVec.eq_of_getElem_eq (by simp [Bool.and_xor_distrib_left])
 
 theorem and_xor_distrib_right {x y z : BitVec w} : (x ^^^ y) &&& z = (x &&& z) ^^^ (y &&& z) :=
   BitVec.eq_of_getElem_eq (by simp [Bool.and_xor_distrib_right])
+
+theorem xor_both_sides (x y z : BitVec n) (h : x = y ^^^ z) : x ^^^ z = y := by
+  grind
+
+theorem and_minus_one (x : BitVec n) : x &&& (~~~0) = x := by
+  simp
 
 
 /- KnownBits -/
@@ -75,6 +77,10 @@ theorem const_implies_singleton_set {n} {kb : KnownBits n} (h : kb.IsConst) :
   exact hcontains
 
 
+def force_membership {n} (kb : KnownBits n) (bv : BitVec n) : BitVec n :=
+  kb.ones ||| (bv &&& kb.unknowns)
+
+
 /- invert (bitwise not) -/
 
 @[grind, simp]
@@ -89,11 +95,6 @@ def IsInversionOf (inv orig : KnownBits n) :=
 theorem invert_sound (kb : KnownBits n) : kb.invert.IsInversionOf kb := by
   grind
 
-theorem xor_both_sides (x y z : BitVec n) (h : x = y ^^^ z) : x ^^^ z = y := by
-  grind
-
-theorem and_minus_one (x : BitVec n) : x &&& (~~~0) = x := by
-  simp
 
 
 
@@ -106,31 +107,14 @@ theorem invert_invert_is_identity (kb : KnownBits n) : kb.invert.invert = kb := 
 
 theorem invert_implies_original_set_contains_invert {n} (kb : KnownBits n) (x : BitVec n) (h : kb.invert.Contains x)
   :  kb.Contains (~~~x) := by
-  have h₁ : kb.invert.invert.Contains (~~~x) := by grind;
-  rw [invert_invert_is_identity] at h₁;
-  exact h₁
+  rw [← invert_invert_is_identity kb];
+  grind
 
-theorem invert_precise_simple {kb inv : KnownBits n} (h : inv.IsInversionOf kb) :
+theorem invert_precise {kb inv : KnownBits n} (h : inv.IsInversionOf kb) :
   kb.invert.Subset inv := by
   intro bv hv;
   have h₁ : kb.Contains (~~~bv) := invert_implies_original_set_contains_invert kb bv hv;
   have h₂ : _ := h h₁; rw [BitVec.not_not] at h₂; exact h₂
-
-
-theorem invert_precise {kb inv : KnownBits n} (h : inv.IsInversionOf kb) :
-     kb.invert.Subset inv := by
-     intro bv hv;
-     unfold KnownBits.IsInversionOf at h;
-     false_or_by_contra
-     have hcontra : ¬ (∃ bv, kb.Contains bv ∧ ¬inv.Contains (~~~bv)) := by grind
-     apply hcontra
-     rename_i h
-     exists ~~~bv;
-     simp_all +decide [ KnownBits.Contains, KnownBits.invert ];
-     ext i; replace hv := congrArg ( fun x => x.getLsbD i ) hv; simp_all +decide;
-     cases h : kb.unknowns[i] <;> cases h' : kb.ones[i] <;> cases h'' : bv[i] <;> simp_all +decide [ Bool.and_comm ]
-     · have := kb.wf; replace := congrArg ( fun x => x.getLsbD i ) this; simp_all +decide
-     · have := kb.wf; replace := congrArg ( fun x => x.getLsbD i ) this; simp_all +decide
 
 
 /- and -/
@@ -141,17 +125,10 @@ def and (kb₁ kb₂ : KnownBits n) : KnownBits n :=
   let knowns := kb₁.zeros ||| kb₂.zeros ||| ones
   { ones, unknowns := ~~~knowns }
 
-def force_membership {n} (kb : KnownBits n) (bv : BitVec n) : BitVec n :=
-  kb.ones ||| (bv &&& kb.unknowns)
-
 
 @[grind, simp]
 def IsAndOf (and a b : KnownBits n) :=
   ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → and.Contains (bv₁ &&& bv₂)
-
-theorem apply_is_and_of {n} (and a b : KnownBits n) (h : and.IsAndOf a b) {bv₁ bv₂} (h₁ : a.Contains bv₁) (h₂ : b.Contains bv₂) :
-  and.Contains (bv₁ &&& bv₂) := by
-  grind;
 
 theorem and_sound {n} (kb₁ kb₂ : KnownBits n) : (kb₁.and kb₂).IsAndOf kb₁ kb₂ := by
   simp only [IsAndOf, and, Contains];
@@ -180,6 +157,10 @@ theorem and_force_membership {n} (kb₁ kb₂ : KnownBits n) (bv : BitVec n) (h 
   have h_simp : (kb₁.ones ||| bv &&& kb₁.unknowns) &&& (kb₂.ones ||| bv &&& kb₂.unknowns) = (kb₁.ones &&& kb₂.ones) ||| (bv &&& (kb₁.unknowns ||| kb₂.unknowns)) := by
     grind;
   grind
+
+theorem apply_is_and_of {n} (and a b : KnownBits n) (h : and.IsAndOf a b) {bv₁ bv₂} (h₁ : a.Contains bv₁) (h₂ : b.Contains bv₂) :
+  and.Contains (bv₁ &&& bv₂) := by
+  grind;
 
 theorem and_precise {and a b : KnownBits n} (h : and.IsAndOf a b) : (a.and b).Subset and := by
   intro bv hv;
@@ -245,10 +226,23 @@ def top (n : Nat) (hn : n > 0) : SMask n where
 def isTop (kb : SMask n) : Prop :=
   ∃ hn : n > 0, kb = top n hn
 
+def lower_bound {n} (kb : SMask n) : (BitVec n) :=
+  kb.smask
+
+def upper_bound {n} (kb : SMask n) : (BitVec n) :=
+  ~~~(kb.smask)
+
+theorem smask_is_negative {n} (kb : SMask n) (h : n > 0) : BitVec.slt kb.smask 0 := by
+  obtain ⟨x, ⟨ h1a, h1b⟩ ⟩ := kb.wf; rw [h1a]; sorry;
+
 @[grind, simp]
 def Contains (kb : SMask n) (val : BitVec n) : Prop :=
   val &&& kb.smask = 0 ∨ val &&& kb.smask = kb.smask
 
+
+theorem lower_bound_is_lower_bound {n} (kb : SMask n) (bv : BitVec n) (h : kb.Contains bv) : BitVec.sle kb.lower_bound bv := by
+  simp [Contains, lower_bound] at *;
+  sorry;
 
 theorem contains_zero {n} (kb : SMask n) : kb.Contains 0 := by
   simp [Contains]
@@ -284,8 +278,7 @@ def add (kb₁ kb₂ : SMask n) (h1 : ¬ kb₁.isTop) (h2 : ¬ kb₂.isTop) : SM
     have h₂ := kb₂.wf;
     obtain ⟨x₁, ⟨ h1a, h1b⟩ ⟩ := h₁;
     obtain ⟨x₂, ⟨ h2a, h2b⟩ ⟩ := h₂;
-    rw [h1a]; rw [h2a];
-    simp; apply Exists.intro (max x₁ x₂); sorry
+    rw [h1a]; rw [h2a]; sorry;
 
 def IsAddOf (sum a b : SMask n) :=
   ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → sum.Contains (bv₁ + bv₂)
