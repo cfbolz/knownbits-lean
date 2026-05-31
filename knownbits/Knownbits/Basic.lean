@@ -401,6 +401,17 @@ theorem all_ones_shift_and_all_ones_shift_is_all_ones_shift {n} (x₁ x₂ : Nat
   (~~~(0 : BitVec n)) <<< x₁ &&& (~~~(0 : BitVec n)) <<< x₂ = (~~~(0 : BitVec n)) <<< max x₁ x₂ := by
   grind
 
+/- add transfer function
+
+add is defined by doing a bitwise and of the two masks, and then shifting left by one.
+
+the intuition is that if we have two ranges of values, the sum of those two ranges is a range that is at
+least as big as the bitwise and of the two ranges, and overflow can occur by one bit.
+
+the well-formedness condition is that the resulting mask is still a valid smask, which is a bit tricky to prove.
+
+-/
+
 @[grind, simp]
 def add (mask₁ mask₂ : SMask n) (h1 : ¬ mask₁.isTop) (h2 : ¬ mask₂.isTop) : SMask n where
   smask := (mask₁.smask &&& mask₂.smask) <<< 1
@@ -434,37 +445,6 @@ def add (mask₁ mask₂ : SMask n) (h1 : ¬ mask₁.isTop) (h2 : ¬ mask₂.isT
           simp [top, h2a, this]
         exact h2 ⟨hn, this⟩
       omega
-
-theorem and_allOnes_shl_eq_zero_iff_toNat_lt {n x : Nat} (hx : x < n) (bv : BitVec n) :
-    bv &&& ((~~~0 : BitVec n) <<< x) = 0 ↔ bv.toNat < 2^x := by
-  rw [BitVec.toNat_lt_iff_getLsbD_eq_false x hx]
-  constructor
-  · intro h k
-    have h_idx : x + k < n ∨ x + k ≥ n := Nat.lt_or_ge (x + k) n
-    by_cases h_lt : x + k < n
-    · have h_bit : (bv &&& ((~~~0 : BitVec n) <<< x)).getLsbD (x + k) = (0 : BitVec n).getLsbD (x + k) := by
-        rw [h]
-      simp [BitVec.getLsbD_and, BitVec.getLsbD_shiftLeft] at h_bit
-      simp [h_lt] at h_bit
-      exact h_bit
-    · apply BitVec.getLsbD_of_ge
-      omega
-  · intro h
-    apply BitVec.eq_of_getLsbD_eq
-    intro i
-    by_cases hi_n : i < n
-    · simp [BitVec.getLsbD_and, BitVec.getLsbD_shiftLeft, hi_n]
-      by_cases h_le : x ≤ i
-      · have := h (i - x)
-        have : x + (i - x) = i := by omega
-        rw [this] at this
-        simp [this]
-      · simp [h_le]
-    · simp [BitVec.getLsbD_of_ge hi_n]
-
-theorem and_allOnes_shl_eq_self_iff_toNat_ge {n x : Nat} (hx : x < n) (bv : BitVec n) :
-    bv &&& ((~~~0 : BitVec n) <<< x) = ((~~~0 : BitVec n) <<< x) ↔ bv.toNat ≥ 2^n - 2^x := by
-  sorry
 
 def IsAddOf (sum a b : SMask n) :=
   ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → sum.Contains (bv₁ + bv₂)
