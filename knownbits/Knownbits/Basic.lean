@@ -333,12 +333,101 @@ theorem add_constfolds {n} (kb₁ kb₂ : KnownBits n) (h₁ : kb₁.IsConst) (h
   rw [h₁, h₂];
   simp;
 
-/-
+private theorem contains_max (kb : KnownBits n) :
+    kb.Contains (kb.ones + kb.unknowns) := by
+  rw [BitVec.add_eq_or_of_and_eq_zero _ _ kb.wf]
+  grind [Contains, knowns, knowns_and_ones_equal_ones]
+
+private theorem add_one_shift_flips_bit (x : BitVec n) (i : Nat) (hi : i < n) :
+    (x + ((1 : BitVec n) <<< i))[i] = !x[i] := by
+  rw [BitVec.getElem_add hi]
+  have hone : (((1 : BitVec n) <<< i)[i]) = true := by
+    simp [BitVec.getElem_shiftLeft]
+  have hpow : 2 ^ i < 2 ^ n := Nat.pow_lt_pow_right (by omega) hi
+  have hcarry : BitVec.carry i x ((1 : BitVec n) <<< i) false = false := by
+    simp [BitVec.carry, BitVec.toNat_shiftLeft, Nat.shiftLeft_eq,
+      Nat.mod_eq_of_lt hpow, Nat.mod_lt _ (Nat.two_pow_pos i)]
+  rw [hone, hcarry]
+  simp
+
+private theorem contains_add_one_shift_of_unknown (kb : KnownBits n) (i : Nat)
+    (hi : i < n) (hu : kb.unknowns[i] = true) :
+    kb.Contains (kb.ones + ((1 : BitVec n) <<< i)) := by
+  have hpow_unknown : ((1 : BitVec n) <<< i) &&& kb.unknowns = ((1 : BitVec n) <<< i) := by
+    apply BitVec.eq_of_getElem_eq
+    intro j hj
+    by_cases hji : j = i
+    · subst j
+      simp [hu]
+    · simp [BitVec.getElem_shiftLeft]
+      omega
+  have hdisjoint : kb.ones &&& ((1 : BitVec n) <<< i) = 0 := by
+    rw [← hpow_unknown]
+    grind [kb.wf]
+  rw [BitVec.add_eq_or_of_and_eq_zero _ _ hdisjoint]
+  rw [← hpow_unknown]
+  exact force_membership_is_member kb ((1 : BitVec n) <<< i)
+
 theorem add_precise {sum a b : KnownBits n} (h : sum.IsAddOf a b) : (a.add b).Subset sum := by
-  intro bv hv;
-  simp only [Contains]; simp only [IsAddOf] at h;
-  sorry /- *much* more difficult -/
--/
+  intro bv hv
+  simp only [Contains, knowns] at hv ⊢
+  have hsv : sum.Contains (a.ones + b.ones) := h ⟨contains_ones a, contains_ones b⟩
+  have hmaxsum : sum.Contains ((a.ones + a.unknowns) + (b.ones + b.unknowns)) :=
+    h ⟨contains_max a, contains_max b⟩
+  apply BitVec.eq_of_getElem_eq
+  intro i hi
+  by_cases hsumunk : sum.unknowns[i]
+  · have hwf := congrArg (fun x : BitVec n => x[i]) sum.wf
+    simp [hsumunk] at hwf ⊢
+    exact hwf
+  · have hsumunk' : sum.unknowns[i] = false := by
+      cases hu : sum.unknowns[i] <;> simp_all
+    have hsv_i : (a.ones + b.ones)[i] = sum.ones[i] := by
+      have hc := congrArg (fun x : BitVec n => x[i]) hsv
+      simpa [Contains, knowns, hsumunk'] using hc
+    have hmax_i : ((a.ones + a.unknowns) + (b.ones + b.unknowns))[i] = sum.ones[i] := by
+      have hc := congrArg (fun x : BitVec n => x[i]) hmaxsum
+      simpa [Contains, knowns, hsumunk'] using hc
+    have hau : a.unknowns[i] = false := by
+      cases hu : a.unknowns[i]
+      · rfl
+      · have hwit : sum.Contains ((a.ones + ((1 : BitVec n) <<< i)) + b.ones) :=
+          h ⟨contains_add_one_shift_of_unknown a i hi hu, contains_ones b⟩
+        have hwit_i : ((a.ones + ((1 : BitVec n) <<< i)) + b.ones)[i] = sum.ones[i] := by
+          have hc := congrArg (fun x : BitVec n => x[i]) hwit
+          simpa [Contains, knowns, hsumunk'] using hc
+        have hrearrange : (a.ones + ((1 : BitVec n) <<< i)) + b.ones =
+            (a.ones + b.ones) + ((1 : BitVec n) <<< i) := by
+          ac_rfl
+        rw [hrearrange, add_one_shift_flips_bit _ i hi] at hwit_i
+        cases hsbit : (a.ones + b.ones)[i] <;> simp_all
+    have hbu : b.unknowns[i] = false := by
+      cases hu : b.unknowns[i]
+      · rfl
+      · have hwit : sum.Contains (a.ones + (b.ones + ((1 : BitVec n) <<< i))) :=
+          h ⟨contains_ones a, contains_add_one_shift_of_unknown b i hi hu⟩
+        have hwit_i : (a.ones + (b.ones + ((1 : BitVec n) <<< i)))[i] = sum.ones[i] := by
+          have hc := congrArg (fun x : BitVec n => x[i]) hwit
+          simpa [Contains, knowns, hsumunk'] using hc
+        rw [← BitVec.add_assoc, add_one_shift_flips_bit _ i hi] at hwit_i
+        cases hsbit : (a.ones + b.ones)[i] <;> simp_all
+    have hsum_rearrange : (a.ones + a.unknowns) + (b.ones + b.unknowns) =
+        (a.ones + b.ones) + (a.unknowns + b.unknowns) := by
+      ac_rfl
+    rw [hsum_rearrange] at hmax_i
+    have hχ : (((a.ones + b.ones) + (a.unknowns + b.unknowns)) ^^^
+        (a.ones + b.ones))[i] = false := by
+      simp [hmax_i, hsv_i]
+    have haddunk : (a.add b).unknowns[i] = false := by
+      simp [add, hau, hbu, hχ]
+    have hbv : bv[i] = (a.add b).ones[i] := by
+      have hc := congrArg (fun x : BitVec n => x[i]) hv
+      simpa only [BitVec.getElem_and, BitVec.getElem_not, haddunk,
+        Bool.not_false, Bool.and_true] using hc
+    have haddones : (a.add b).ones[i] = (a.ones + b.ones)[i] := by
+      simp [add, hau, hbu, hχ]
+    simp [hsumunk']
+    rw [hbv, haddones, hsv_i]
 
 
 
