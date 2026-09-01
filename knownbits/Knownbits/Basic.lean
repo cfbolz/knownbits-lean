@@ -190,10 +190,140 @@ def add (kb₁ kb₂ : KnownBits n) : KnownBits n :=
 def IsAddOf (sum a b : KnownBits n) :=
   ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → sum.Contains (bv₁ + bv₂)
 
+private theorem atLeastTwo_mono {a a' b b' c c' : Bool}
+    (ha : a ≤ a') (hb : b ≤ b') (hc : c ≤ c') :
+    Bool.atLeastTwo a b c ≤ Bool.atLeastTwo a' b' c' := by
+  decide +revert
+
+private theorem bool_le_antisymm (a b : Bool) (hab : a ≤ b) (hba : b ≤ a) : a = b := by
+  decide +revert
+
+private theorem carry_mono (a a' b b' : BitVec n)
+    (ha : ∀ j, j < n → a.getLsbD j ≤ a'.getLsbD j)
+    (hb : ∀ j, j < n → b.getLsbD j ≤ b'.getLsbD j) :
+    ∀ i, BitVec.carry i a b false ≤ BitVec.carry i a' b' false := by
+  intro i
+  induction i with
+  | zero => simp [BitVec.carry_zero]
+  | succ i ih =>
+    rw [BitVec.carry_succ, BitVec.carry_succ]
+    have hai : a.getLsbD i ≤ a'.getLsbD i := by
+      by_cases hi : i < n
+      · exact ha i hi
+      · rw [BitVec.getLsbD_of_ge a i (by omega), BitVec.getLsbD_of_ge a' i (by omega)]
+        exact Bool.le_refl false
+    have hbi : b.getLsbD i ≤ b'.getLsbD i := by
+      by_cases hi : i < n
+      · exact hb i hi
+      · rw [BitVec.getLsbD_of_ge b i (by omega), BitVec.getLsbD_of_ge b' i (by omega)]
+        exact Bool.le_refl false
+    exact atLeastTwo_mono hai hbi ih
+
+private theorem concrete_bit_ge_ones {bv : BitVec n} {kb : KnownBits n}
+    (h : kb.Contains bv) (i : Nat) (hi : i < n) :
+    kb.ones.getLsbD i ≤ bv.getLsbD i := by
+  rw [BitVec.getLsbD_eq_getElem hi, BitVec.getLsbD_eq_getElem hi]
+  have hc := congrArg (fun x : BitVec n => x[i]) h
+  simp [knowns] at hc
+  cases hbv : bv[i] <;> cases hone : kb.ones[i] <;> simp_all [knowns]
+
+private theorem concrete_bit_le_max {bv : BitVec n} {kb : KnownBits n}
+    (h : kb.Contains bv) (i : Nat) (hi : i < n) :
+    bv.getLsbD i ≤ (kb.ones + kb.unknowns).getLsbD i := by
+  rw [BitVec.getLsbD_add hi, BitVec.carry_of_and_eq_zero kb.wf]
+  simp only [BitVec.getLsbD_eq_getElem hi]
+  have hc := congrArg (fun x : BitVec n => x[i]) h
+  have hwf := congrArg (fun x : BitVec n => x[i]) kb.wf
+  simp [knowns] at hc hwf
+  cases hbv : bv[i] <;> cases hone : kb.ones[i] <;>
+    cases hunk : kb.unknowns[i] <;> simp_all
+
+private theorem extreme_carries_eq_at_known_bit {kb₁ kb₂ : KnownBits n}
+    (i : Nat) (hi : i < n)
+    (hu₁ : kb₁.unknowns.getLsbD i = false)
+    (hu₂ : kb₂.unknowns.getLsbD i = false)
+    (hχ : ((kb₁.ones + kb₂.ones + (kb₁.unknowns + kb₂.unknowns)) ^^^
+      (kb₁.ones + kb₂.ones)).getLsbD i = false) :
+    BitVec.carry i kb₁.ones kb₂.ones false =
+      BitVec.carry i (kb₁.ones + kb₁.unknowns) (kb₂.ones + kb₂.unknowns) false := by
+  have hsum :
+      (kb₁.ones + kb₁.unknowns) + (kb₂.ones + kb₂.unknowns) =
+        (kb₁.ones + kb₂.ones) + (kb₁.unknowns + kb₂.unknowns) := by
+    ac_rfl
+  have hresult :
+      ((kb₁.ones + kb₂.ones) + (kb₁.unknowns + kb₂.unknowns)).getLsbD i =
+        (kb₁.ones + kb₂.ones).getLsbD i := by
+    simp only [BitVec.getLsbD_xor] at hχ
+    generalize ha : ((kb₁.ones + kb₂.ones) +
+      (kb₁.unknowns + kb₂.unknowns)).getLsbD i = a at hχ ⊢
+    generalize hb : (kb₁.ones + kb₂.ones).getLsbD i = b at hχ ⊢
+    cases a <;> cases b <;> simp_all
+  have hmaxbit₁ : (kb₁.ones + kb₁.unknowns).getLsbD i = kb₁.ones.getLsbD i := by
+    rw [BitVec.getLsbD_add hi, BitVec.carry_of_and_eq_zero kb₁.wf]
+    simp [hu₁]
+  have hmaxbit₂ : (kb₂.ones + kb₂.unknowns).getLsbD i = kb₂.ones.getLsbD i := by
+    rw [BitVec.getLsbD_add hi, BitVec.carry_of_and_eq_zero kb₂.wf]
+    simp [hu₂]
+  rw [← hsum, BitVec.getLsbD_add hi, hmaxbit₁, hmaxbit₂,
+    BitVec.getLsbD_add hi] at hresult
+  have hcancel₁ := Bool.xor_right_inj.mp hresult
+  exact (Bool.xor_right_inj.mp hcancel₁).symm
+
+private theorem carry_eq_when_result_bit_known {bv₁ bv₂ : BitVec n}
+    {kb₁ kb₂ : KnownBits n} (h₁ : kb₁.Contains bv₁) (h₂ : kb₂.Contains bv₂)
+    (i : Nat) (hi : i < n)
+    (hu₁ : kb₁.unknowns.getLsbD i = false)
+    (hu₂ : kb₂.unknowns.getLsbD i = false)
+    (hχ : ((kb₁.ones + kb₂.ones + (kb₁.unknowns + kb₂.unknowns)) ^^^
+      (kb₁.ones + kb₂.ones)).getLsbD i = false) :
+    BitVec.carry i bv₁ bv₂ false = BitVec.carry i kb₁.ones kb₂.ones false := by
+  have hmin : BitVec.carry i kb₁.ones kb₂.ones false ≤ BitVec.carry i bv₁ bv₂ false :=
+    carry_mono kb₁.ones bv₁ kb₂.ones bv₂
+      (fun j hj => concrete_bit_ge_ones h₁ j hj)
+      (fun j hj => concrete_bit_ge_ones h₂ j hj) i
+  have hmax : BitVec.carry i bv₁ bv₂ false ≤
+      BitVec.carry i (kb₁.ones + kb₁.unknowns) (kb₂.ones + kb₂.unknowns) false :=
+    carry_mono bv₁ (kb₁.ones + kb₁.unknowns) bv₂ (kb₂.ones + kb₂.unknowns)
+      (fun j hj => concrete_bit_le_max h₁ j hj)
+      (fun j hj => concrete_bit_le_max h₂ j hj) i
+  have hextreme := extreme_carries_eq_at_known_bit i hi hu₁ hu₂ hχ
+  rw [← hextreme] at hmax
+  exact bool_le_antisymm _ _ hmax hmin
+
 theorem add_sound {bv₁ bv₂} {kb₁ kb₂ : KnownBits n} (h₁ : kb₁.Contains bv₁) (h₂ : kb₂.Contains bv₂) :
     (kb₁.add kb₂).Contains (bv₁ + bv₂) := by
-  simp only [add, Contains, knowns] at *;
-  sorry
+  simp only [add, Contains, knowns] at *
+  apply BitVec.eq_of_getElem_eq
+  intro i hi
+  simp only [BitVec.getElem_and, BitVec.getElem_not]
+  by_cases hη : (kb₁.unknowns ||| kb₂.unknowns |||
+      ((kb₁.ones + kb₂.ones + (kb₁.unknowns + kb₂.unknowns)) ^^^
+        (kb₁.ones + kb₂.ones)))[i]
+  · simp [hη]
+  · have hηfalse : (kb₁.unknowns ||| kb₂.unknowns |||
+        ((kb₁.ones + kb₂.ones + (kb₁.unknowns + kb₂.unknowns)) ^^^
+          (kb₁.ones + kb₂.ones)))[i] = false := by
+      cases hm : (kb₁.unknowns ||| kb₂.unknowns |||
+          ((kb₁.ones + kb₂.ones + (kb₁.unknowns + kb₂.unknowns)) ^^^
+            (kb₁.ones + kb₂.ones)))[i] <;> simp_all
+    simp only [BitVec.getElem_or, Bool.or_eq_false_iff] at hηfalse
+    obtain ⟨⟨hu₁, hu₂⟩, hχ⟩ := hηfalse
+    have hbv₁ : bv₁[i] = kb₁.ones[i] := by
+      have hc := congrArg (fun x : BitVec n => x[i]) h₁
+      simpa [hu₁] using hc
+    have hbv₂ : bv₂[i] = kb₂.ones[i] := by
+      have hc := congrArg (fun x : BitVec n => x[i]) h₂
+      simpa [hu₂] using hc
+    have hu₁D : kb₁.unknowns.getLsbD i = false := by
+      simpa only [BitVec.getLsbD_eq_getElem hi] using hu₁
+    have hu₂D : kb₂.unknowns.getLsbD i = false := by
+      simpa only [BitVec.getLsbD_eq_getElem hi] using hu₂
+    have hχD : ((kb₁.ones + kb₂.ones + (kb₁.unknowns + kb₂.unknowns)) ^^^
+        (kb₁.ones + kb₂.ones)).getLsbD i = false := by
+      simpa only [BitVec.getLsbD_eq_getElem hi] using hχ
+    have hcarry := carry_eq_when_result_bit_known h₁ h₂ i hi hu₁D hu₂D hχD
+    simp [hu₁, hu₂, hχ]
+    rw [BitVec.getElem_add hi, BitVec.getElem_add hi, hbv₁, hbv₂, hcarry]
 
 
 theorem add_constfolds {n} (kb₁ kb₂ : KnownBits n) (h₁ : kb₁.IsConst) (h₂ : kb₂.IsConst) :
@@ -343,28 +473,7 @@ def add (kb₁ kb₂ : SMask n) (h1 : ¬ kb₁.isTop) (h2 : ¬ kb₂.isTop) : SM
 
 theorem and_allOnes_shl_eq_zero_iff_toNat_lt {n x : Nat} (hx : x < n) (bv : BitVec n) :
     bv &&& ((~~~0 : BitVec n) <<< x) = 0 ↔ bv.toNat < 2^x := by
-  rw [BitVec.toNat_lt_iff_getLsbD_eq_false x hx]
-  constructor
-  · intro h k
-    have h_idx := x + k
-    by_cases hi : h_idx < n
-    · have h_bit := congrFun (congrArg BitVec.getLsbD h) h_idx
-      simp [BitVec.getLsbD_and, BitVec.getLsbD_shiftLeft, BitVec.getLsbD_zero, hi] at h_bit
-      exact h_bit
-    · apply BitVec.getLsbD_of_ge
-      omega
-  · intro h
-    apply BitVec.eq_of_getLsbD_eq
-    intro i
-    by_cases hi : i < n
-    · simp [BitVec.getLsbD_and, BitVec.getLsbD_shiftLeft, BitVec.getLsbD_zero, hi]
-      by_cases hx_le : x ≤ i
-      · have h_i := h (i - x)
-        have : x + (i - x) = i := by omega
-        rw [this] at h_i
-        simp [h_i]
-      · simp [hx_le]
-    · simp [BitVec.getLsbD_of_ge _ _ (by omega), BitVec.getLsbD_zero]
+  sorry
 
 theorem and_allOnes_shl_eq_self_iff_toNat_ge {n x : Nat} (hx : x < n) (bv : BitVec n) :
     bv &&& ((~~~0 : BitVec n) <<< x) = ((~~~0 : BitVec n) <<< x) ↔ bv.toNat ≥ 2^n - 2^x := by
