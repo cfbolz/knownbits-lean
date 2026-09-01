@@ -467,10 +467,6 @@ def Contains (kb : SMask n) (val : BitVec n) : Prop :=
   val &&& kb.smask = 0 ∨ val &&& kb.smask = kb.smask
 
 
-theorem lower_bound_is_lower_bound {n} (kb : SMask n) (bv : BitVec n) (h : kb.Contains bv) : BitVec.sle kb.lower_bound bv := by
-  simp [Contains, lower_bound] at *;
-  sorry;
-
 theorem contains_zero {n} (kb : SMask n) : kb.Contains 0 := by
   simp [Contains]
 
@@ -562,11 +558,102 @@ def add (kb₁ kb₂ : SMask n) (h1 : ¬ kb₁.isTop) (h2 : ¬ kb₂.isTop) : SM
 
 theorem and_allOnes_shl_eq_zero_iff_toNat_lt {n x : Nat} (hx : x < n) (bv : BitVec n) :
     bv &&& ((~~~0 : BitVec n) <<< x) = 0 ↔ bv.toNat < 2^x := by
-  sorry
+  rw [BitVec.toNat_lt_iff_getLsbD_eq_false x hx]
+  constructor
+  · intro h k
+    by_cases hi : x + k < n
+    · have hb := congrArg (fun z : BitVec n => z[x + k]) h
+      simp [BitVec.getElem_shiftLeft] at hb
+      rw [BitVec.getLsbD_eq_getElem hi]
+      cases hv : bv[x + k] <;> simp_all
+      omega
+    · exact BitVec.getLsbD_of_ge bv (x + k) (by omega)
+  · intro h
+    apply BitVec.eq_of_getElem_eq
+    intro i hi
+    by_cases hxi : x ≤ i
+    · have hb := h (i - x)
+      have heq : x + (i - x) = i := by omega
+      rw [heq, BitVec.getLsbD_eq_getElem hi] at hb
+      simp [BitVec.getElem_shiftLeft, hb]
+    · simp [BitVec.getElem_shiftLeft]
+      omega
 
 theorem and_allOnes_shl_eq_self_iff_toNat_ge {n x : Nat} (hx : x < n) (bv : BitVec n) :
     bv &&& ((~~~0 : BitVec n) <<< x) = ((~~~0 : BitVec n) <<< x) ↔ bv.toNat ≥ 2^n - 2^x := by
-  sorry
+  have hcompl :
+      bv &&& ((~~~0 : BitVec n) <<< x) = ((~~~0 : BitVec n) <<< x) ↔
+        (~~~bv) &&& ((~~~0 : BitVec n) <<< x) = 0 := by
+    constructor
+    · intro h
+      apply BitVec.eq_of_getElem_eq
+      intro i hi
+      by_cases hxi : x ≤ i
+      · have hb := congrArg (fun z : BitVec n => z[i]) h
+        simp [BitVec.getElem_shiftLeft, hxi] at hb ⊢
+        simp [hb]
+      · simp [BitVec.getElem_shiftLeft]
+        omega
+    · intro h
+      apply BitVec.eq_of_getElem_eq
+      intro i hi
+      by_cases hxi : x ≤ i
+      · have hb := congrArg (fun z : BitVec n => z[i]) h
+        simp [BitVec.getElem_shiftLeft, hxi] at hb ⊢
+        cases hv : bv[i]
+        · have := hb hv
+          omega
+        · rfl
+      · simp [BitVec.getElem_shiftLeft, hxi]
+  rw [hcompl, and_allOnes_shl_eq_zero_iff_toNat_lt hx]
+  simp only [BitVec.toNat_not]
+  have hbv := bv.isLt
+  have hpow : 2 ^ x ≤ 2 ^ n := Nat.pow_le_pow_right Nat.zero_lt_two (by omega)
+  omega
+
+theorem lower_bound_is_lower_bound {n} (kb : SMask n) (bv : BitVec n) (h : kb.Contains bv) : BitVec.sle kb.lower_bound bv := by
+  obtain ⟨x, hxmask, hxn⟩ := kb.wf
+  have hn : 0 < n := by omega
+  have hxpred : x ≤ n - 1 := by omega
+  have hpow : 2 ^ x ≤ 2 ^ (n - 1) :=
+    Nat.pow_le_pow_right Nat.zero_lt_two hxpred
+  have hnshift : 2 ^ n = 2 ^ (n - 1) + 2 ^ (n - 1) := by
+    calc
+      2 ^ n = 2 ^ (n - 1 + 1) := by congr 1 <;> omega
+      _ = 2 ^ (n - 1) + 2 ^ (n - 1) := by rw [Nat.pow_succ]; omega
+  have hmasknat : ((~~~(0 : BitVec n)) <<< x).toNat = 2 ^ n - 2 ^ x := by
+    rw [BitVec.toNat_shiftLeft, BitVec.toNat_not]
+    change ((2 ^ n - 1) <<< x) % 2 ^ n = 2 ^ n - 2 ^ x
+    rw [Nat.shiftLeft_eq]
+    have hxp : 0 < 2 ^ x := Nat.two_pow_pos x
+    have hxle : 2 ^ x ≤ 2 ^ n := by omega
+    have hid : (2 ^ n - 1) * 2 ^ x =
+        (2 ^ x - 1) * 2 ^ n + (2 ^ n - 2 ^ x) := by
+      have ha : 2 ^ x ≤ 2 ^ n * 2 ^ x :=
+        Nat.le_mul_of_pos_left _ (Nat.two_pow_pos n)
+      have hp : 2 ^ n ≤ 2 ^ x * 2 ^ n :=
+        Nat.le_mul_of_pos_left _ hxp
+      rw [Nat.sub_mul, Nat.sub_mul]
+      simp
+      rw [Nat.mul_comm (2 ^ x) (2 ^ n)]
+      have hp' : 2 ^ n ≤ 2 ^ n * 2 ^ x := by
+        simpa [Nat.mul_comm] using hp
+      exact (Nat.sub_add_sub_cancel hp' hxle).symm
+    rw [hid, Nat.add_mod, Nat.mul_mod_left, Nat.zero_add,
+      Nat.mod_eq_of_lt (by omega), Nat.mod_eq_of_lt (by omega)]
+  simp only [Contains] at h
+  change kb.smask.sle bv = true
+  rw [hxmask] at h ⊢
+  rw [BitVec.sle_iff_toInt_le]
+  rcases h with h | h
+  · rw [and_allOnes_shl_eq_zero_iff_toNat_lt hxn] at h
+    simp only [BitVec.toInt]
+    rw [hmasknat]
+    split <;> split <;> omega
+  · rw [and_allOnes_shl_eq_self_iff_toNat_ge hxn] at h
+    simp only [BitVec.toInt]
+    rw [hmasknat]
+    split <;> split <;> omega
 
 def IsAddOf (sum a b : SMask n) :=
   ∀ {bv₁ bv₂}, a.Contains bv₁ ∧ b.Contains bv₂ → sum.Contains (bv₁ + bv₂)
@@ -576,4 +663,57 @@ theorem add_top_sound {n} (sm₁ sm₂ : SMask n) (hn : n > 0) : (top n hn).IsAd
   intro bv₁ bv₂ h; grind
 
 theorem add_sound {n} (sm₁ sm₂ : SMask n) (h1 : ¬ sm₁.isTop) (h2 : ¬ sm₂.isTop) : (sm₁.add sm₂ h1 h2).IsAddOf sm₁ sm₂ := by
-  sorry
+  obtain ⟨x₁, hx₁mask, hx₁n⟩ := sm₁.wf
+  obtain ⟨x₂, hx₂mask, hx₂n⟩ := sm₂.wf
+  let m := max x₁ x₂
+  have hn : 0 < n := by omega
+  have hx₁ : x₁ < n - 1 := by
+    apply Classical.byContradiction
+    intro h
+    have heq : x₁ = n - 1 := by omega
+    apply h1
+    exact ⟨hn, SMask.ext _ _ (by simp [top, hx₁mask, heq])⟩
+  have hx₂ : x₂ < n - 1 := by
+    apply Classical.byContradiction
+    intro h
+    have heq : x₂ = n - 1 := by omega
+    apply h2
+    exact ⟨hn, SMask.ext _ _ (by simp [top, hx₂mask, heq])⟩
+  have hm : m + 1 < n := by simp [m]; omega
+  have hp₁ : 2 ^ x₁ ≤ 2 ^ m :=
+    Nat.pow_le_pow_right Nat.zero_lt_two (by exact Nat.le_max_left _ _)
+  have hp₂ : 2 ^ x₂ ≤ 2 ^ m :=
+    Nat.pow_le_pow_right Nat.zero_lt_two (by exact Nat.le_max_right _ _)
+  have hpm : 2 ^ (m + 1) = 2 ^ m + 2 ^ m := by
+    rw [show m + 1 = m.succ by omega, Nat.pow_succ]
+    omega
+  intro bv₁ bv₂ h
+  rcases h with ⟨hb₁, hb₂⟩
+  simp only [Contains] at hb₁ hb₂ ⊢
+  rw [hx₁mask] at hb₁
+  rw [hx₂mask] at hb₂
+  simp only [add, hx₁mask, hx₂mask,
+    all_ones_shift_and_all_ones_shift_is_all_ones_shift]
+  rw [← BitVec.shiftLeft_add]
+  change bv₁ + bv₂ &&& ((~~~(0 : BitVec n)) <<< (m + 1)) = 0 ∨
+    bv₁ + bv₂ &&& ((~~~(0 : BitVec n)) <<< (m + 1)) =
+      (~~~(0 : BitVec n)) <<< (m + 1)
+  rw [and_allOnes_shl_eq_zero_iff_toNat_lt hm,
+    and_allOnes_shl_eq_self_iff_toNat_ge hm, BitVec.toNat_add]
+  rw [and_allOnes_shl_eq_zero_iff_toNat_lt hx₁n] at hb₁
+  rw [and_allOnes_shl_eq_self_iff_toNat_ge hx₁n] at hb₁
+  rw [and_allOnes_shl_eq_zero_iff_toNat_lt hx₂n] at hb₂
+  rw [and_allOnes_shl_eq_self_iff_toNat_ge hx₂n] at hb₂
+  have hbv₁ := bv₁.isLt
+  have hbv₂ := bv₂.isLt
+  have hsum : bv₁.toNat + bv₂.toNat < 2 ^ n + 2 ^ n := by omega
+  by_cases hwrap : bv₁.toNat + bv₂.toNat < 2 ^ n
+  · rw [Nat.mod_eq_of_lt hwrap]
+    rcases hb₁ with hb₁ | hb₁ <;> rcases hb₂ with hb₂ | hb₂
+    all_goals simp only [hpm] at *
+    all_goals omega
+  · have hge : 2 ^ n ≤ bv₁.toNat + bv₂.toNat := by omega
+    rw [Nat.mod_eq_sub_mod hge, Nat.mod_eq_of_lt (by omega)]
+    rcases hb₁ with hb₁ | hb₁ <;> rcases hb₂ with hb₂ | hb₂
+    all_goals simp only [hpm] at *
+    all_goals omega
